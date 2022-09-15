@@ -1,3 +1,9 @@
+# USED to create images of all the integration times in the dataset
+# USAGE:
+# in bash:
+# for i in {1..5}; do casa -c autointim.py my.ms $i 5 & done
+
+
 import glob
 import datetime
 # Used to create unique filenames
