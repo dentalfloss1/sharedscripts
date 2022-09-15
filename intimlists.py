@@ -1,3 +1,8 @@
+# Used to run 8 second integration images through TraP in batches of adjacent images
+# Needs updating for TraP v5.0rc2
+# Needs updating for idia
+# contact me for advice on how to do this
+
 from astropy.io import fits
 import glob
 import numpy as np 
