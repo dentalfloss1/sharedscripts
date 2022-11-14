@@ -8,7 +8,7 @@ import shutil
 
 
 start_epoch = datetime.datetime(1858, 11, 17, 00, 00, 00, 00) # MJD epoch date
-files = glob.glob('/media/physics/Zoe2tb/1582287955_intim/*fits')
+files = glob.glob('/idia/users/sarahchastain/images_to_measure/int/GRB220730A/*/*fits')
 images = np.zeros(len(files), dtype={'names': ('imagename', 'date'), 'formats': ('U128','f8')})
 
 for i in tqdm(range(len(files))):
@@ -29,7 +29,7 @@ for i in range(len(images[1:])):
         listindex += 1 
         listgod.append([images['imagename'][i]])
 for i in range(len(listgod)):
-    # subprocess.run(['trap-manage.py','initjob','chunk'+str(i)])
+    subprocess.run(['singularity','exec','/idia/software/containers/trap/trapv5.0rc2.simg','trap-manage.py','initjob','chunk'+str(i)])
     shutil.rmtree('chunk'+str(i)+"/images_to_process.py", ignore_errors=True)
     shutil.rmtree('chunk'+str(i)+"/job_params.cfg", ignore_errors=True)
     imagesfilecontent = f"""
@@ -58,27 +58,27 @@ images = {listgod[i]}
 print "******** IMAGES: ********"
 for f in images:
     print f
-print "*************************"
+print "*************************" 
 """
-    jobparamscontent = """
-[persistence]
+    jobparamscontent = """[persistence]
 description = "TRAP dataset"
 dataset_id = -1
 rms_est_sigma = 4            ; Sigma value used for iterative clipping in RMS estimation
 rms_est_fraction = 8         ; Determines size of image subsection used for RMS estimation
+bandwidth_max = 0.0          ; if non zero override bandwidth of image, determines which images fall in same band
+
+[quality]
 rms_est_history = 100        ; how many images used for calculating rms histogram
 rms_est_max = 100            ; global maximum acceptable rms
 rms_est_min = 0.0            ; global minimum acceptable rms
-rms_rej_sigma = 3	     ; threshold for rejecting images using rms histogram
-bandwidth_max = 0.0          ; if non zero override bandwidth of image, determines which images fall in same band
+rms_rej_sigma = 3            ; threshold for rejecting images using rms histogram
 oversampled_x = 30           ; threshold for oversampled check
-elliptical_x = 2.0           ; threshold for elliptical check
+elliptical_x = 10.0           ; threshold for elliptical check
 
-[quality_lofar]
+
+[quality_lofar]              ; LOFAR only checks for casa images
 low_bound = 1                ; multiplied with noise to define lower threshold
 high_bound = 80              ; multiplied with noise to define upper threshold
-oversampled_x = 30           ; threshold for oversampled check
-elliptical_x = 2.0           ; threshold for elliptical check
 min_separation = 10          ; minimum distance to a bright source (in degrees)
 
 [source_extraction]
@@ -87,8 +87,8 @@ analysis_threshold = 3
 back_size_x = 50
 back_size_y = 50
 margin = 10
-deblend_nthresh = 10          ; Number of subthresholds for deblending; 0 disables
-extraction_radius_pix = 2500
+deblend_nthresh = 0          ; Number of subthresholds for deblending; 0 disables
+extraction_radius_pix = 2000
 force_beam = True
 box_in_beampix = 10
 ew_sys_err = 10              ; Systematic errors on ra & decl (units in arcsec)
@@ -97,7 +97,7 @@ expiration = 10              ; number of forced fits performed after a blind fit
 
 [association]
 deruiter_radius = 5.68
-beamwidths_limit =  3.0
+beamwidths_limit =  1.0
 
 [transient_search]
 new_source_sigma_margin = 1
@@ -116,4 +116,4 @@ ports = '6666,6667,6668,6669,6670,6671'   ; the port of the stream
         f.write(jobparamscontent)
 
 for i in range(len(listgod)):
-    subprocess.run(['trap-manage.py','run','chunk'+str(i)], stderr=subprocess.STDOUT)
+    subprocess.run(['singularity','exec','/idia/software/containers/trap/trapv5.0rc2.simg','trap-manage.py','run','chunk'+str(i)], stderr=subprocess.STDOUT)
