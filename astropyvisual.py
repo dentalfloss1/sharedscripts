@@ -1,3 +1,7 @@
+# I used this file to draw lines and shapes on top of an image 
+# see astropyvisual.png for what this outputs
+
+
 from astropy.wcs import WCS
 from astropy.io import fits
 from astropy.utils.data import get_pkg_data_filename
