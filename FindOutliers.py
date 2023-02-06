@@ -978,20 +978,18 @@ if __name__ == '__main__':
     # in the reported pointing. We'll do a little rounding to work around this problem 
     uniquepointingfloat = np.unique(pointingfloat.round(decimals=2),axis=0)
     # Iterate over the pointings getting the image names from the pointing in question
+    print(uniquepointingfloat)
     for point in uniquepointingfloat:
         print('Iterating over pointings')
         if bool(rmsqcmax) and bool(rmsqcmin):
-            refinesqlstring = """ (sqlseparation(%s, %s, skyregion.centre_ra, skyregion.centre_decl) < (0.01)) AND (image.rms_qc < %s) AND (image.rms_qc > %s)"""
-            inserttuple = (point[0], point[1], rmsqcmax, rmsqcmin,)
+            refinesqlstring = """ (image.rms_qc < %s) AND (image.rms_qc > %s)"""
+            inserttuple = (rmsqcmax, rmsqcmin,)
         elif bool(rmsqcmax) and not bool(rmsqcmin):
-            refinesqlstring = """  (sqlseparation(%s, %s, skyregion.centre_ra, skyregion.centre_decl) < (0.01)) AND (image.rms_qc < %s)"""
-            inserttuple = (point[0], point[1], rmsqcmax,)
+            refinesqlstring= """ (image.rms_qc < %s)"""
+            inserttuple = (rmsqcmax,)
         elif not bool(rmsqcmax) and bool(rmsqcmin):
-            refinesqlstring = """  (sqlseparation(%s, %s, skyregion.centre_ra, skyregion.centre_decl) < (0.01)) AND (image.rms_qc > %s)"""
-            inserttuple = (point[0], point[1], rmsqcmin,)
-        elif not bool(rmsqcmax) and not bool(rmsqcmin):
-            refinesqlstring = """ (sqlseparation(%s, %s, skyregion.centre_ra, skyregion.centre_decl) < (0.01)) """
-            inserttuple = (point[0], point[1],)
+            refinesqlstring = """  (image.rms_qc > %s)"""
+            inserttuple = (rmsqcmin,)
         appendsqlstring = """;"""
 
         if bool(args.exclusionsfile):
@@ -1039,7 +1037,11 @@ if __name__ == '__main__':
             continue
 
         # set sql addendum for angular restriction of sources
-        varinsertlist = list(inserttuple)
+        try:
+            inserttuple
+            varinsertlist = list(inserttuple)
+        except NameError:
+            varinsertlist = []
         varinsertlist.insert(0,str(args.angrestrict))
         varinsertlist.insert(0, datasetTOexamine)
         varinserttuple = tuple(varinsertlist)
@@ -1065,11 +1067,23 @@ if __name__ == '__main__':
             appendsqlstring = """ GROUP BY runningcatalog.id,varmetric.eta_int, varmetric.v_int, image.dataset HAVING MAX(extractedsource.det_sigma) > %s""" + appendsqlstring
         varinserttuple = tuple(varinsertlist)
         print('Acquiring varmetric data')
-        varmetricdata = dovarmetricquery(""" (image.dataset in %s) AND (sqlseparation(extractedsource.ra, extractedsource.decl, skyregion.centre_ra, skyregion.centre_decl) < %s) AND """+refinesqlstring+appendsqlstring, varinserttuple)
+        try:
+            refinesqlstring
+            doand = """ AND""" + """refinesqlstring"""
+        except NameError:
+            doand = """ """
+        varmetricdata = dovarmetricquery(""" (image.dataset in %s) AND (sqlseparation(extractedsource.ra, extractedsource.decl, skyregion.centre_ra, skyregion.centre_decl) < %s) """+doand+appendsqlstring, varinserttuple)
         print('Acquiring bright source data')
-        stabarr = querystablesrcs(""" AND """+refinesqlstring+""";""", inserttuple)   
+        try:
+            stabarr = querystablesrcs(""" AND """+refinesqlstring+""";""", inserttuple)   
+        except NameError:
+            stabarr = querystablesrcs(""";""", 0)   
         print('Acquiring bigarr')
-        bigarr = queryallsrcs(furtherrefinedSQLstring+""" AND """+refinesqlstring+""";""", BIGinserttuple)
+        try:
+            bigarr = queryallsrcs(furtherrefinedSQLstring+""" AND """+refinesqlstring+""";""", BIGinserttuple)
+        except NameError:
+            bigarr = queryallsrcs(furtherrefinedSQLstring+""";""", BIGinserttuple)
+
         duplicates = []
         if args.deduplicate:
             print('Deduplicating')
@@ -1112,10 +1126,15 @@ if __name__ == '__main__':
         reletaVarr = getetavtoplot(varmetricdata)
         if bool(args.srcid):
             bigarr = bigarr[np.isin(bigarr['id'], srcidTOexamine)]
+        print('dumpvarmetric',point)
         if args.dumpvarmetric:
             for d in datasetTOexamine:
+                print('using dataset ',d)
+                print(varmetricdata['dataset'])
                 if d in varmetricdata['dataset']:
-                    np.savetxt('ds'+str(d)+'_varmetric.csv', varmetricdata[(varmetricdata['dataset']==d) & (varmetricdata['eta'] > 0) & (varmetricdata['v'] > 0)],delimiter=',')
+                    print('Now saving varmetric binary')
+                    np.save(f'ds{d}pointra{point[0]}pointdec{point[1]}varmetric.npy',varmetricdata[(varmetricdata['dataset']==d) & (varmetricdata['eta'] > 0) & (varmetricdata['v'] > 0)])
+  #                   np.savetxt(f'ds{d}_point_{point}_varmetric.csv', varmetricdata[(varmetricdata['dataset']==d) & (varmetricdata['eta'] > 0) & (varmetricdata['v'] > 0)],delimiter=',')
         if args.makeplots:
                 # If this is zero, there is nothing to plot
             if bigarr.shape[0] != 0 : 
@@ -1228,3 +1247,4 @@ if args.associatesources:
             myfile = glob.glob('*src*' + str(src) + '*mp4')
             os.replace(myfile[0], 'src'+str(mainsrc)+'/'+myfile[0])
     
+
