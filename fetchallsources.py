@@ -1,3 +1,10 @@
+# INSTRUCTIONS: 
+# 1. import all the environment variables by executing "source trapenvvar.bash" or whatever your file is called
+# 2. get the dataset number from banana (should read dataset #X) where X is the number you want
+# 3. execute by running python fetchallsources.py X
+# 4. output file will be named datasetXdump.csv
+# NOTE, file output may be very large in some cases and could take some time. 
+
 import numpy as np
 import psycopg2
 import datetime
