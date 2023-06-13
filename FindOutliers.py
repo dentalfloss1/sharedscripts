@@ -55,8 +55,12 @@ parser.add_argument('--parallelanimatebysrc', action='store_true', help='Run in 
 parser.add_argument('--paralleldataset', action='store_true', help='Run in parallel making movies over datasets (run on full node only)')
 parser.add_argument('--bigpicture', action='store_true', help='Make movie of srcs in field')
 parser.add_argument('--skipsrcmovies', action='store_true', help='Skip movies of sources')
+<<<<<<< HEAD
 parser.add_argument('--dumpvarmetric', action='store_true', help='Dump varmetric data into npy file')
 parser.add_argument('--dumpbigarr', action='store_true', help='Dump bigarr data into npy file')
+=======
+parser.add_argument('--dumpvarmetric', action='store_true', help='Dump varmetric data into CSV file of name "ds???_varmetric.csv"')
+>>>>>>> c613d1c17d2bbd543108c19799447ef036c497db
 parser.add_argument('--importvarmetric', type=str,default='noimport', help='Import varmetric data from CSV file')
 parser.add_argument('--associatesources', action='store_true', help='Associate a provided list of sources (via --srcid) with other sources nearby in other images')
 parser.add_argument('--resume', action='store_true', help='Resume a previously failed or aborted run based on filenames')
