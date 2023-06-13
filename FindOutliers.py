@@ -31,6 +31,7 @@ register_adapter(np.int64, addapt_numpy_int64)
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('--dataset', nargs="*",  type=int,help='plot --dataset ??? only')
 parser.add_argument('--srcid', nargs="*",  type=int, help='plot --srcid ??? only')
+parser.add_argument('--srclist',   type=str, help='plot srcids in srclist (separated by newlines) only')
 parser.add_argument('--rmsqcmax', nargs=1, type=float, help='Max rmsqc to consider for images')
 parser.add_argument('--rmsqcmin', nargs=1, type=float, help='Min rmsqc to consider for images')
 parser.add_argument('--angrestrict',  type=float, default=1.0, help='Sets max angular sep from image center for candidate sources')
@@ -55,17 +56,21 @@ parser.add_argument('--paralleldataset', action='store_true', help='Run in paral
 parser.add_argument('--bigpicture', action='store_true', help='Make movie of srcs in field')
 parser.add_argument('--skipsrcmovies', action='store_true', help='Skip movies of sources')
 parser.add_argument('--dumpvarmetric', action='store_true', help='Dump varmetric data into CSV file of name "ds???_varmetric.csv"')
+parser.add_argument('--importvarmetric', type=str,default='noimport', help='Import varmetric data from CSV file')
 parser.add_argument('--associatesources', action='store_true', help='Associate a provided list of sources (via --srcid) with other sources nearby in other images')
 parser.add_argument('--resume', action='store_true', help='Resume a previously failed or aborted run based on filenames')
 parser.add_argument('--animateinteresting', action='store_true', help='Determine interesting sources using mean and sigma thresholds and animate them')
 parser.add_argument('--vmin',  default=-2e-5, type=float, help='Set vmin for color scaling of images. If negative, include equals sign: --vmin=-2e-5')
 parser.add_argument('--vmax', default=1e-3, type=float, help='Set vmax for color scaling of images')
+parser.add_argument('--autovmax', action='store_true', help='Set vmax to max flux of each source')
 parser.add_argument('--nsigma', default=1, type=float, help='Set nsigma threshold to add to mean')
 parser.add_argument('--sigthresh', default=5, type=str, help='Limit to sources detected at --sigthresh at least once')
+parser.add_argument('--keepims', action='store_true', help='Keep images')
 args = parser.parse_args()
 # In order to use MJD
 start_epoch = datetime.datetime(1858, 11, 17, 00, 00, 00, 00)
-
+if args.srclist:
+    args.srcid = list(np.loadtxt(args.srclist,dtype=int))
 # PDF of the log10 normal distribution
 # https://stats.stackexchange.com/questions/22607/base-10-lognormal-pdf-integrated-over-log10x
 def lognormal(x, mu, sigma):
@@ -100,9 +105,7 @@ def queryfordatasets(refinesqlstring,inserttuple):
     cur.execute("""select distinct image.dataset from assocxtrsource 
     join runningcatalog on runningcatalog.id=assocxtrsource.runcat 
     join extractedsource on extractedsource.id=assocxtrsource.xtrsrc 
-    join image on image.id=extractedsource.image join varmetric on 
-    varmetric.runcat=runningcatalog.id join runningcatalog_flux on 
-    runningcatalog.id=runningcatalog_flux.id join skyregion on skyregion.id = image.skyrgn where  """+refinesqlstring,inserttuple)
+    join image on image.id=extractedsource.image join skyregion on skyregion.id = image.skyrgn where  """+refinesqlstring,inserttuple)
     datasetstoanalyze = cur.fetchall()
     # creates an array of tuples, need to make into an array of ints
     return tuple([d[0] for d in datasetstoanalyze])
@@ -150,27 +153,27 @@ def querystablesrcs(refinesqlstring, inserttuple):
     """Take in a string to add to query and a tuple to insert, return a dataset of stable sources.
     Where stabarr is made"""
     
-    cur.execute("""SELECT image.taustart_ts , extractedsource.f_int, extractedsource.ra, extractedsource.decl, image.url, runningcatalog.id, extractedsource.f_peak_err, extractedsource.f_int_err, extractedsource.f_peak, image.dataset, varmetric.v_int, varmetric.eta_int  FROM assocxtrsource 
+    cur.execute("""SELECT image.taustart_ts , extractedsource.f_int, extractedsource.ra, extractedsource.decl, image.url, runningcatalog.id, extractedsource.f_peak_err, extractedsource.f_int_err, extractedsource.f_peak, image.dataset  FROM assocxtrsource 
     JOIN runningcatalog ON runningcatalog.id=assocxtrsource.runcat 
     JOIN extractedsource ON extractedsource.id=assocxtrsource.xtrsrc 
-    JOIN image ON image.id=extractedsource.image JOIN varmetric ON 
-    varmetric.runcat=runningcatalog.id JOIN runningcatalog_flux ON 
+    JOIN image ON image.id=extractedsource.image
+    JOIN runningcatalog_flux ON 
     runningcatalog.id=runningcatalog_flux.id JOIN skyregion ON skyregion.id = image.skyrgn WHERE (extractedsource.f_int > 0.01) AND (sqlseparation(extractedsource.ra, extractedsource.decl, skyregion.centre_ra, skyregion.centre_decl) < (0.5))  """+refinesqlstring, inserttuple )
     stab = cur.fetchall()
-    return np.array(stab, dtype=[('date',object),('f_int','f8'),('ra','f8'),('dec','f8'),('image','U128'),('id','i8'),('f_pk_err','f8'),('f_int_err','f8'),('f_pk','f8'),('dataset','i8'),('v','f8'),('eta','f8')])
+    return np.array(stab, dtype=[('date',object),('f_int','f8'),('ra','f8'),('dec','f8'),('image','<U256'),('id','i8'),('f_pk_err','f8'),('f_int_err','f8'),('f_pk','f8'),('dataset','i8')])
 
 def queryallsrcs(refinesqlstring, inserttuple):
     """Take in a string to addd to query and a tuple to insert, and return a dataset of all detected sources
     Where bigarr is made """
 
-    cur.execute("""SELECT image.taustart_ts , extractedsource.f_int, extractedsource.ra, extractedsource.decl, image.url, runningcatalog.id, extractedsource.f_peak_err, extractedsource.f_int_err, extractedsource.f_peak, image.dataset, varmetric.v_int, varmetric.eta_int FROM assocxtrsource 
+    cur.execute("""SELECT image.taustart_ts , extractedsource.f_int, extractedsource.ra, extractedsource.decl, image.url, runningcatalog.id, extractedsource.f_peak_err, extractedsource.f_int_err, extractedsource.f_peak, image.dataset FROM assocxtrsource 
     JOIN runningcatalog ON runningcatalog.id=assocxtrsource.runcat 
     JOIN extractedsource ON extractedsource.id=assocxtrsource.xtrsrc 
-    JOIN image ON image.id=extractedsource.image JOIN varmetric ON 
-    varmetric.runcat=runningcatalog.id JOIN runningcatalog_flux ON 
+    JOIN image ON image.id=extractedsource.image  
+     JOIN runningcatalog_flux ON 
     runningcatalog.id=runningcatalog_flux.id JOIN skyregion ON skyregion.id = image.skyrgn WHERE   """+refinesqlstring, inserttuple)
     big = cur.fetchall()
-    return np.array(big, dtype=[('date',object),('f_int','f8'),('ra','f8'),('dec','f8'),('image','U128'),('id','i8'),('f_pk_err','f8'),('f_int_err','f8'),('f_pk','f8'),('dataset','i8'),('v','f8'),('eta','f8')])
+    return np.array(big, dtype=[('date',object),('f_int','f8'),('ra','f8'),('dec','f8'),('image','<U256'),('id','i8'),('f_pk_err','f8'),('f_int_err','f8'),('f_pk','f8'),('dataset','i8')])
 
 def getinterestingsrcs(d):
     v = varmetricdata[varmetricdata['dataset']==d]
@@ -460,6 +463,10 @@ def dsparallelanimatesrc(d):
         detloc = SkyCoord(bigarr['ra'][srcidscondition][0], bigarr['dec'][srcidscondition][0], unit='deg')
         dates = []
         dummyint = 0
+        if args.autovmax:
+            vmax = np.amax(bigarr['f_int'][bigarr['id']==src])
+        else:
+            vmax = args.vmax
         if srcid not in alreadyplotted:
             for myfile in files:
                 if args.localimage:
@@ -478,7 +485,7 @@ def dsparallelanimatesrc(d):
                 # Show movie of source location
                 if not args.noimage:
                     ax1 = fig.add_subplot(2,3,1,projection=wcs)
-                    ax1.imshow(hdu.data[0:][0:][0][0], vmin=args.vmin, vmax=args.vmax, origin='lower')
+                    ax1.imshow(hdu.data[0:][0:][0][0], vmin=args.vmin, vmax=vmax, origin='lower')
                     ax1.set_ylim(wcslocation[1] - 50, wcslocation[1] + 50 )
                     ax1.set_xlim(wcslocation[0] - 50 , wcslocation[0] + 50)
                     if bigarr['ra'][srcidscondition][bigdates[srcidscondition]==mydate].size > 0:
@@ -560,7 +567,7 @@ def dsparallelanimatesrc(d):
                 # Show big image
                 if not args.noimage:
                     ax5 = fig.add_subplot(2,3,5, projection=wcs)
-                    ax5.imshow(hdu.data[0:][0:][0][0], vmin=args.vmin, vmax=args.vmax, origin='lower')
+                    ax5.imshow(hdu.data[0:][0:][0][0], vmin=args.vmin, vmax=vmax, origin='lower')
                     ax5.add_patch(Quadrangle((detloc.ra, detloc.dec), 100*u.arcsec, 100*u.arcsec,
                         edgecolor='white', facecolor='none',transform=ax5.get_transform('fk5')))
                 else:
@@ -597,16 +604,17 @@ def dsparallelanimatesrc(d):
 
 
 def animatesrc(src):
+    print(src)
     """Plots the specified source and animates it, may be in parallel"""
     
     def makeimagesforanimation(myfile):
                 return plotfilename
-            
     rel = reletaVarr[reletaVarr['id']==src]
     datasetkey = (bigarr['dataset'] == v['dataset'][0])
     stabdatasetkey = (stabarr['dataset'] == v['dataset'][0])
     srcidscondition = (bigarr['id'] == src)
     files = np.unique(stabarr['image'][stabarr['dataset']==d])
+    print(files)
     if args.usefpk:
         stabydat1=stabarr['f_pk']
     else:
@@ -618,6 +626,10 @@ def animatesrc(src):
     detloc = SkyCoord(bigarr['ra'][srcidscondition][0], bigarr['dec'][srcidscondition][0], unit='deg')
     dates = []
     dummyint = 0
+    if args.autovmax:
+        vmax = np.amax(bigarr['f_int'][bigarr['id']==src])
+    else:
+        vmax = args.vmax
     if srcid not in alreadyplotted:
         for myfile in files:
             if args.localimage:
@@ -628,6 +640,30 @@ def animatesrc(src):
                 hdu = hdul[0]
                 wcs = WCS(hdu.header, naxis=2)
                 wcslocation = wcs.world_to_pixel(detloc)
+               #  if detloc.separation(imagecenter).degree > args.angrestrict:
+               #      print('angular separation is ',detloc.separation(imagecenter).degree)
+               #      print('skipping')
+               #      print(myfile)
+               #      input('presskey')
+               #      hdul.close()
+               #      plt.close()
+               #      continue
+                if (np.amax(wcslocation) > hdu.data[0:][0:][0][0].shape[0]):
+                    print(np.amax(wcslocation),'is greater than',hdu.data[0:][0:][0][0].shape[0])
+                    hdul.close()
+                    plt.close()
+                    continue 
+                elif (np.amin(wcslocation) < 50):
+                    print(np.amin(wcslocation),'is less than',50)
+                    hdul.close()
+                    plt.close()
+                    continue 
+                elif np.isnan(wcslocation[0]) or np.isnan(wcslocation[1]):
+                    print(wcslocation)
+                    hdul.close()
+                    plt.close()
+                    continue 
+                print(wcslocation, np.isnan(wcslocation[0]))
                 mydate = (datetime.datetime.strptime(hdu.header['DATE-OBS'], "%Y-%m-%dT%H:%M:%S.%f") - start_epoch).total_seconds()/3600/24 
             else:
                 mydate = stabdates[dummyint] 
@@ -636,13 +672,13 @@ def animatesrc(src):
             # Show movie of source location
             if not args.noimage:
                 ax1 = fig.add_subplot(2,3,1,projection=wcs)
-                ax1.imshow(hdu.data[0:][0:][0][0], vmin=args.vmin, vmax=args.vmax, origin='lower')
-                ax1.set_ylim(wcslocation[1] - 50, wcslocation[1] + 50 )
-                ax1.set_xlim(wcslocation[0] - 50 , wcslocation[0] + 50)
+                ax1.imshow(hdu.data[0:][0:][0][0], vmin=args.vmin, vmax=vmax, origin='lower')
                 if bigarr['ra'][srcidscondition][bigdates[srcidscondition]==mydate].size > 0:
                     skysrc = SkyCoord(bigarr['ra'][srcidscondition][bigdates[srcidscondition]==mydate], bigarr['dec'][srcidscondition][bigdates[srcidscondition]==mydate], unit='deg')
                     wcscurloc = wcs.world_to_pixel(skysrc)
                     ax1.scatter(wcscurloc[0], wcscurloc[1], color='red', marker='x')
+                ax1.set_ylim(wcslocation[1] - 50, wcslocation[1] + 50 )
+                ax1.set_xlim(wcslocation[0] - 50 , wcslocation[0] + 50)
             else:
                 ax1 = fig.add_subplot(2,3,1)
             fig.suptitle('Dataset '+str(d)+', Date: '+str(mydate))
@@ -681,12 +717,12 @@ def animatesrc(src):
                 ax2.axhline(fdl, linestyle=':')
 
             # fit variability metrics to lognormal dist
-            (etamu, etasigma) = norm.fit(np.log10(v['eta'][v['eta']>0]))
-            etamean = lognormalmean(etamu,etasigma)
-            etastdev = lognormalstdev(etamu, etasigma)
-            (vmu, vsigma) = norm.fit(np.log10(v['v'][v['v']>0]))
-            vmean = lognormalmean(vmu,vsigma)
-            vstdev = lognormalstdev(vmu, vsigma)
+            #   (etamu, etasigma) = norm.fit(np.log10(v['eta'][v['eta']>0]))
+            #   etamean = lognormalmean(etamu,etasigma)
+            #   etastdev = lognormalstdev(etamu, etasigma)
+            #   (vmu, vsigma) = norm.fit(np.log10(v['v'][v['v']>0]))
+            #   vmean = lognormalmean(vmu,vsigma)
+            #   vstdev = lognormalstdev(vmu, vsigma)
 
             #  Plot eta v 
             ax3 = fig.add_subplot(2,3,3, projection='rectilinear')
@@ -699,8 +735,9 @@ def animatesrc(src):
             ax3.set_title('V: '+str(rel['v'])+', eta: '+str(rel['eta']))
             ax3.set_xlabel('eta')
             ax3.set_ylabel('V')
-            ax3.axvline(etamean + args.nsigma*etastdev)
-            ax3.axhline(vmean + args.nsigma*vstdev)
+#               ax3.axvline(etamean + args.nsigma*etastdev)
+#               ax3.axhline(vmean + args.nsigma*vstdev)
+            ax3.axvline(2)
 
             # Plot Fint stability 
             ax4 = fig.add_subplot(2,3,4, projection='rectilinear')
@@ -719,7 +756,7 @@ def animatesrc(src):
             # Show big image
             if not args.noimage:
                 ax5 = fig.add_subplot(2,3,5, projection=wcs)
-                ax5.imshow(hdu.data[0:][0:][0][0], vmin=args.vmin, vmax=args.vmax, origin='lower')
+                ax5.imshow(hdu.data[0:][0:][0][0], vmin=args.vmin, vmax=vmax, origin='lower')
                 ax5.add_patch(Quadrangle((detloc.ra, detloc.dec), 100*u.arcsec, 100*u.arcsec,
                     edgecolor='white', facecolor='none',transform=ax5.get_transform('fk5')))
             else:
@@ -727,11 +764,14 @@ def animatesrc(src):
 
             # Put text in empty plot
             ax6 = fig.add_subplot(2,3,6, projection='rectilinear')
-            ordinal = lambda n: "%d%s" % (n,"tsnrhtdd"[(n//10%10!=1)*(n%10<4)*n%10::4])
-            rankedV = rankdata(-v['v'], method='ordinal')
-            rankedeta = rankdata(-v['eta'], method='ordinal')
-            ax6.text(0.1,0.5,ordinal(rankedeta[rel['eta'] == v['eta']][0])+' highest '+'eta', fontsize='large')
-            ax6.text(0.1,0.3,ordinal(rankedV[rel['v'] == v['v']][0])+' highest '+'V', fontsize='large')
+            try:
+               ordinal = lambda n: "%d%s" % (n,"tsnrhtdd"[(n//10%10!=1)*(n%10<4)*n%10::4])
+               rankedV = rankdata(-v['v'], method='ordinal')
+               rankedeta = rankdata(-v['eta'], method='ordinal')
+               ax6.text(0.1,0.5,ordinal(rankedeta[rel['eta'] == v['eta']][0])+' highest '+'eta', fontsize='large')
+               ax6.text(0.1,0.3,ordinal(rankedV[rel['v'] == v['v']][0])+' highest '+'V', fontsize='large')
+            except Exception as e:
+                print(e)
             ax6.set_xticks([])
             ax6.set_yticks([])
             # Name and save plots
@@ -743,16 +783,18 @@ def animatesrc(src):
             plt.close()
             plotfilenames.append(name)
         plotfilenamearr = np.array(plotfilenames)
-        datesort = np.argsort(dates)
-        with imageio.get_writer('src'+str(srcid)+'.mp4', mode='I',fps=2) as writer:
-            for myfile in plotfilenamearr[datesort]:
-                image = imageio.imread(myfile)
-                writer.append_data(image)
-        print("wrote video: ",'src'+str(srcid)+'.mp4')
-        alreadyplotted.append(srcid)
-        for myfile in plotfilenames:
-            print('removing: ',myfile)
-            os.remove(myfile)
+        if plotfilenamearr.size > 0:
+            datesort = np.argsort(dates)
+            with imageio.get_writer('src'+str(srcid)+'.mp4', mode='I',fps=2) as writer:
+                for myfile in plotfilenamearr[datesort]:
+                    image = imageio.imread(myfile)
+                    writer.append_data(image)
+            print("wrote video: ",'src'+str(srcid)+'.mp4')
+            alreadyplotted.append(srcid)
+            if not args.keepims:
+                for myfile in plotfilenames:
+                    print('removing: ',myfile)
+                    os.remove(myfile)
                     
 def animatefield(srcstoconsider):
     """Plots the specified source and animates it, may be in parallel"""
@@ -900,7 +942,7 @@ if __name__ == '__main__':
                     skyregion.id=image.skyrgn JOIN runningcatalog ON runningcatalog.id=assocxtrsource.runcat WHERE assocxtrsource.runcat 
                     IN %s;""",(tuple(srcgrp),))
                 imposfetch = cur.fetchall()
-                imposarr = np.array(imposfetch, dtype=[('id','i8'),('image','U128'),('ra','f8'),('dec','f8'),('fint','f8'),('finterr','f8'),('rmsqc','f8')])
+                imposarr = np.array(imposfetch, dtype=[('id','i8'),('image','<U256'),('ra','f8'),('dec','f8'),('fint','f8'),('finterr','f8'),('rmsqc','f8')])
                 for subsrc in srcgrp:
                     if subsrc != src:
                        if np.array_equal(imposarr[['image','ra','dec']][imposarr['id']==subsrc] , imposarr[['image','ra','dec']][imposarr['id']==src]):
@@ -960,7 +1002,9 @@ if __name__ == '__main__':
             srcidlist = args.srcid
 
         srcidTOexamine = tuple(srcidlist,)
+        print(srcidTOexamine)
         datasetTOexamine = queryfordatasets("""runningcatalog.id IN %s;""",(srcidTOexamine,))
+        print(datasetTOexamine)
         cur.execute(""" SELECT DISTINCT skyregion.centre_ra, skyregion.centre_decl FROM extractedsource JOIN 
             assocxtrsource ON assocxtrsource.xtrsrc=extractedsource.id JOIN image ON image.id=extractedsource.image
             JOIN skyregion ON skyregion.id=image.skyrgn WHERE assocxtrsource.runcat IN
@@ -993,8 +1037,12 @@ if __name__ == '__main__':
         appendsqlstring = """;"""
 
         if bool(args.exclusionsfile):
-            refinesqlstring = """ (runningcatalog.id NOT IN %s) AND """ + refinesqlstring
-            insertlist = list(inserttuple)
+            try:
+                refinesqlstring = """ (runningcatalog.id NOT IN %s) AND """ + refinesqlstring
+                insertlist = list(inserttuple)
+            except NameError:
+                refinesqlstring = """ (runningcatalog.id NOT IN %s) """
+                insertlist = []
             insertlist.insert(0, tuple(excludedid))
             inserttuple = tuple(insertlist)
         # if datasets not specified, get them now to include in sql query for varmetric array
@@ -1033,6 +1081,7 @@ if __name__ == '__main__':
                         datasetlist.remove(dsnum)
                 print('after: ',datasetlist)
             datasetTOexamine = tuple(datasetlist)
+        print(datasetTOexamine,len(datasetTOexamine))
         if len(datasetTOexamine)==0:
             continue
 
@@ -1069,10 +1118,17 @@ if __name__ == '__main__':
         print('Acquiring varmetric data')
         try:
             refinesqlstring
-            doand = """ AND""" + """refinesqlstring"""
+            doand = """ AND""" + refinesqlstring
         except NameError:
             doand = """ """
-        varmetricdata = dovarmetricquery(""" (image.dataset in %s) AND (sqlseparation(extractedsource.ra, extractedsource.decl, skyregion.centre_ra, skyregion.centre_decl) < %s) """+doand+appendsqlstring, varinserttuple)
+        if args.importvarmetric=='noimport':
+            print(""" (image.dataset in %s) AND (sqlseparation(extractedsource.ra, extractedsource.decl, skyregion.centre_ra, skyregion.centre_decl) < %s) """+doand+appendsqlstring, varinserttuple)
+
+            varmetricdata = dovarmetricquery(""" (image.dataset in %s) AND (sqlseparation(extractedsource.ra, extractedsource.decl, skyregion.centre_ra, skyregion.centre_decl) < %s) """+doand+appendsqlstring, varinserttuple)
+        else:
+            print(args.importvarmetric)
+            varmetricdata = np.loadtxt(args.importvarmetric,delimiter=',',dtype=[('eta','f8'),('v','f8'),('dataset','i8'),('id','i8'),('det_sigma','f8')])
+
         print('Acquiring bright source data')
         try:
             stabarr = querystablesrcs(""" AND """+refinesqlstring+""";""", inserttuple)   
@@ -1107,6 +1163,7 @@ if __name__ == '__main__':
             duplicatesarr = np.array(duplicates[::2])
             beforelen = len(np.unique(bigarr['id']))
             bigarr = bigarr[(~np.isin(bigarr['id'], duplicatesarr))]
+            np.save('dedupedids.npy',bigarr['id'])
             print('Deduplicated ',beforelen-len(np.unique(bigarr['id'])),' sources')
             varmetricdata = varmetricdata[(~np.isin(varmetricdata['id'], duplicatesarr))]
         if bool(args.FDlimits):
@@ -1134,88 +1191,49 @@ if __name__ == '__main__':
                 if d in varmetricdata['dataset']:
                     print('Now saving varmetric binary')
                     np.save(f'ds{d}pointra{point[0]}pointdec{point[1]}varmetric.npy',varmetricdata[(varmetricdata['dataset']==d) & (varmetricdata['eta'] > 0) & (varmetricdata['v'] > 0)])
-  #                   np.savetxt(f'ds{d}_point_{point}_varmetric.csv', varmetricdata[(varmetricdata['dataset']==d) & (varmetricdata['eta'] > 0) & (varmetricdata['v'] > 0)],delimiter=',')
-        if args.makeplots:
-                # If this is zero, there is nothing to plot
-            if bigarr.shape[0] != 0 : 
-                # Get an array of dates, preserve order, make MJD
-                dates = np.array([(b - start_epoch).total_seconds()/3600/24 for b in bigarr['date']])
-                # Do the same, but with stabarr, since stabarr has a more complete dataset
-                stabdates = np.array([(s - start_epoch).total_seconds()/3600/24 for s in stabarr['date']])
-                if args.usefpk:
-                    stabydat1 = stabarr['f_peak']
-                else:
-                    stabydat1 = stabarr['f_int']
-                # Get a common x/y range for eta-v plot for all plots in an observation
-                etamin = np.amin(varmetricdata['eta'][varmetricdata['eta']>0])
-                etamax = np.amax(varmetricdata['eta'][varmetricdata['eta']>0])
-                vmin = np.amin(varmetricdata['v'][varmetricdata['v']>0])
-                vmax = np.amax(varmetricdata['v'][varmetricdata['v']>0])
-                if args.parallel and len(datasetTOexamine) > 2:
-                    with Pool() as pool:
-                        pool.map(makeplots,datasetTOexamine)
-                else:
-                    for d in datasetTOexamine:
-                        makeplots(d)
-            else: 
-                print("no sources")
-        if args.makemovies:
-            moviedir = 'point'+str(point).replace('[','').replace(']','').replace(' ','_').replace('.','p')
-            if not os.path.exists(moviedir):
-                os.makedirs(moviedir)
-
-            if bigarr.shape[0] != 0 : 
-                # Get a common x/y range for eta-v plot for all plots in an observation
-                xmin = np.amin(varmetricdata['eta'][varmetricdata['eta']>0])
-                xmax = np.amax(varmetricdata['eta'][varmetricdata['eta']>0])
-                ymin = np.amin(varmetricdata['v'][varmetricdata['v']>0])
-                ymax = np.amax(varmetricdata['v'][varmetricdata['v']>0])
-                if args.paralleldataset and (len(datasetTOexamine) > 2):
-                    with Pool() as pool:
-                        pool.map(dsparallelanimatesrc, datasetTOexamine)
-                else:
-                    for d in datasetTOexamine:
-                        fdl = np.unique(fdlimits['fdlimit'][fdlimits['dataset']==d])
-                        v = varmetricdata[varmetricdata['dataset']==d]
-                        alreadyplotted = []
-                        sortedv = np.sort(v['v'])
-                        sortedeta = np.sort(v['eta'])
-                        intersectbigrel = np.intersect1d(bigarr['id'],reletaVarr['id'])
-                        if args.animateinteresting:
-                            srcstoconsider = getinterestingsrcs(d)
-                            args.srcid = list(srcstoconsider)
-                            reletaVarr = getetavtoplot(varmetricdata)
-                        else:
-                            srcstoconsider = np.intersect1d(intersectbigrel,v['id'])
-                        if not args.skipsrcmovies:
-                            print("making ", len(srcstoconsider)," movies")
-                            if args.parallel and len(srcstoconsider) > 2:
-                                with Pool() as pool:
-                                    pool.map(animatesrc, srcstoconsider)
-                            else:
-                                for src in srcstoconsider:
-                                    animatesrc(src)
-                        if not args.noimage and args.bigpicture:
-                            animatefield(srcstoconsider)
-                        for f in glob.glob('src*mp4'):
-                            os.rename(f,moviedir+'/'+f)
-                        if args.animateinteresting:
-                            args.srcid = []
-
-                                 # Some integration images aren't finished running though TraP yet. These will show an
-                                 # IndexError. We skip these and delete the axis. A simple way of dealing with a problem
-                                 # that I don't want to worry about
-            else: 
-                print("no sources")
-        if args.makeimages:
-            print("making multi-images")
-            
-            if bigarr.shape[0] != 0 : 
-                # Get a common x/y range for eta-v plot for all plots in an observation
-                xmin = np.amin(varmetricdata['eta'][varmetricdata['eta']>0])
-                xmax = np.amax(varmetricdata['eta'][varmetricdata['eta']>0])
-                ymin = np.amin(varmetricdata['v'][varmetricdata['v']>0])
-                ymax = np.amax(varmetricdata['v'][varmetricdata['v']>0])
+  #               np.savetxt(f'ds{d}_point_{point}_varmetric.csv', varmetricdata[(varmetricdata['dataset']==d) & (varmetricdata['eta'] > 0) & (varmetricdata['v'] > 0)],delimiter=',')
+        if args.importvarmetric!='noimport':
+            break
+    if args.makeplots:
+            # If this is zero, there is nothing to plot
+        if bigarr.shape[0] != 0 : 
+            # Get an array of dates, preserve order, make MJD
+            dates = np.array([(b - start_epoch).total_seconds()/3600/24 for b in bigarr['date']])
+            # Do the same, but with stabarr, since stabarr has a more complete dataset
+            stabdates = np.array([(s - start_epoch).total_seconds()/3600/24 for s in stabarr['date']])
+            if args.usefpk:
+                stabydat1 = stabarr['f_peak']
+            else:
+                stabydat1 = stabarr['f_int']
+            # Get a common x/y range for eta-v plot for all plots in an observation
+            etamin = np.amin(varmetricdata['eta'][varmetricdata['eta']>0])
+            etamax = np.amax(varmetricdata['eta'][varmetricdata['eta']>0])
+            vmin = np.amin(varmetricdata['v'][varmetricdata['v']>0])
+            vmax = np.amax(varmetricdata['v'][varmetricdata['v']>0])
+            if args.parallel and len(datasetTOexamine) > 2:
+                with Pool() as pool:
+                    pool.map(makeplots,datasetTOexamine)
+            else:
+                for d in datasetTOexamine:
+                    makeplots(d)
+        else: 
+            print("no sources")
+    print('About to make movies')
+    if args.makemovies:
+        print('making movies!!!!')
+        moviedir = 'point'+str(point).replace('[','').replace(']','').replace(' ','_').replace('.','p')
+        if not os.path.exists(moviedir):
+            os.makedirs(moviedir)
+        if bigarr.shape[0] != 0 : 
+            # Get a common x/y range for eta-v plot for all plots in an observation
+            xmin = np.amin(varmetricdata['eta'][(varmetricdata['eta']>0) & (varmetricdata['eta'] < np.inf)])
+            xmax = np.amax(varmetricdata['eta'][(varmetricdata['eta']>0) & (varmetricdata['eta'] < np.inf)])
+            ymin = np.amin(varmetricdata['v'][(varmetricdata['v']>0) & (varmetricdata['v'] < np.inf)])
+            ymax = np.amax(varmetricdata['v'][(varmetricdata['v']>0) & (varmetricdata['v'] < np.inf)])
+            if args.paralleldataset and (len(datasetTOexamine) > 2):
+                with Pool() as pool:
+                    pool.map(dsparallelanimatesrc, datasetTOexamine)
+            else:
                 for d in datasetTOexamine:
                     fdl = np.unique(fdlimits['fdlimit'][fdlimits['dataset']==d])
                     v = varmetricdata[varmetricdata['dataset']==d]
@@ -1223,20 +1241,62 @@ if __name__ == '__main__':
                     sortedv = np.sort(v['v'])
                     sortedeta = np.sort(v['eta'])
                     intersectbigrel = np.intersect1d(bigarr['id'],reletaVarr['id'])
-                    srcstoconsider = np.intersect1d(intersectbigrel,v['id'])
+                    if args.animateinteresting:
+                        srcstoconsider = getinterestingsrcs(d)
+                        args.srcid = list(srcstoconsider)
+                        reletaVarr = getetavtoplot(varmetricdata)
+                    else:
+                        srcstoconsider = np.intersect1d(intersectbigrel,v['id'])
                     if not args.skipsrcmovies:
+                        print("making ", len(srcstoconsider)," movies")
                         if args.parallel and len(srcstoconsider) > 2:
-                            with Pool() as pool:
-                                pool.map(makeimages, srcstoconsider)
+                            with Pool(10) as pool:
+                                pool.map(animatesrc, srcstoconsider)
                         else:
                             for src in srcstoconsider:
-                                makeimages(src)
+                                animatesrc(src)
+                    if not args.noimage and args.bigpicture:
+                        animatefield(srcstoconsider)
+                    for f in glob.glob('src*mp4'):
+                        os.rename(f,moviedir+'/'+f)
+                    if args.animateinteresting:
+                        args.srcid = []
 
                              # Some integration images aren't finished running though TraP yet. These will show an
                              # IndexError. We skip these and delete the axis. A simple way of dealing with a problem
                              # that I don't want to worry about
-            else: 
-                print("no sources")
+        else: 
+            print("no sources")
+    if args.makeimages:
+        print("making multi-images")
+        
+        if bigarr.shape[0] != 0 : 
+            # Get a common x/y range for eta-v plot for all plots in an observation
+            xmin = np.amin(varmetricdata['eta'][varmetricdata['eta']>0])
+            xmax = np.amax(varmetricdata['eta'][varmetricdata['eta']>0])
+            ymin = np.amin(varmetricdata['v'][varmetricdata['v']>0])
+            ymax = np.amax(varmetricdata['v'][varmetricdata['v']>0])
+            for d in datasetTOexamine:
+                fdl = np.unique(fdlimits['fdlimit'][fdlimits['dataset']==d])
+                v = varmetricdata[varmetricdata['dataset']==d]
+                alreadyplotted = []
+                sortedv = np.sort(v['v'])
+                sortedeta = np.sort(v['eta'])
+                intersectbigrel = np.intersect1d(bigarr['id'],reletaVarr['id'])
+                srcstoconsider = np.intersect1d(intersectbigrel,v['id'])
+                if not args.skipsrcmovies:
+                    if args.parallel and len(srcstoconsider) > 2:
+                        with Pool() as pool:
+                            pool.map(makeimages, srcstoconsider)
+                    else:
+                        for src in srcstoconsider:
+                            makeimages(src)
+
+                         # Some integration images aren't finished running though TraP yet. These will show an
+                         # IndexError. We skip these and delete the axis. A simple way of dealing with a problem
+                         # that I don't want to worry about
+        else: 
+            print("no sources")
 
             
 if args.associatesources: 
